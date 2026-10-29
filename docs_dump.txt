@@ -1,0 +1,53 @@
+Developers
+API documentation
+Session-cookie REST on the same origin as the app. Base path:
+/api/v1
+.
+1 · Auth
+Browser apps use
+credentials: "include"
+. The session cookie is
+ap_session
+.
+POST /api/v1/auth/signup
+, email, password (≥8), phone, country, optional
+referral_code
+POST /api/v1/auth/login
+·
+POST /api/v1/auth/logout
+·
+GET /api/v1/auth/me
+GET /api/v1/auth/ws-token
+, short-lived feed ticket.
+2 · Trading
+Contracts settle
+3 ticks
+after entry (~3s). Digit = last decimal of
+price.toFixed(2)
+.
+GET /api/v1/contracts/?status=open|closed
+POST /api/v1/contracts/bulk
+Feed:
+ws(s)://
+{host}
+/api/v1/feed/ws
+(localhost also serves
+:8080
+)
+3 · Apps (developer console)
+Register apps at
+/developer
+. Provide a name and at least one redirect URI. The
+app_secret
+is shown once on create. OAuth authorize/token and
+/ws/v1
+are
+not implemented
+yet.
+4 · Refer & Earn
+Real accounts get a referral code. Share
+/?ref=CODE
+(any page works). Commission accrues on referred players' real-wallet net gaming revenue; claim to balance via
+POST /api/v1/partner/claim
+.
+← Developer apps
