@@ -44,7 +44,7 @@ def log_event(msg: str):
 
 class StartBotRequest(BaseModel):
     mode: str = "demo"                   # "demo" or "real"
-    email: Optional[str] = ""
+    identifier: Optional[str] = ""       # Phone or Email
     password: Optional[str] = ""
     initial_stake_usd: float = 1.0
     tp_usd: float = 20.0
@@ -70,11 +70,15 @@ async def run_trading_worker(config: StartBotRequest):
             # 1. Authenticate
             wallet_id = ""
             login_id = ""
+            ident = config.identifier.strip()
+            login_payload = {"email": ident, "password": config.password} if "@" in ident else {"phone": ident, "password": config.password}
+
             if config.mode == "real":
-                log_event(f"Authenticating REAL account: {config.email} ...")
-                async with http.post(f"{BASE_URL}/api/v1/auth/login", json={"email": config.email, "password": config.password}) as r:
+                log_event(f"Authenticating REAL account: {ident} ...")
+                async with http.post(f"{BASE_URL}/api/v1/auth/login", json=login_payload) as r:
                     if r.status != 200:
-                        log_event(f"ERROR: Real login failed ({r.status})")
+                        err_msg = await r.text()
+                        log_event(f"ERROR: Real login failed ({r.status}): {err_msg}")
                         state.is_running = False
                         return
                 async with http.get(f"{BASE_URL}/api/v1/auth/me") as r:
@@ -88,16 +92,35 @@ async def run_trading_worker(config: StartBotRequest):
                     login_id = w["loginid"]
                     wallet_id = w["id"]
                     state.balance_usd = w.get("balance_cents", 0) / 100.0
-                    log_event(f"Real Wallet Active: {login_id} | Balance: ${state.balance_usd:.2f}")
+                    log_event(f"Real Wallet Active: {login_id} | Balance: ${state.balance_usd:.2f} {w.get('currency', 'USD')}")
+                    if state.balance_usd <= 0:
+                        log_event("WARNING: Real balance is $0.00. Fund your wallet or trade on Demo.")
             else:
-                log_event("Creating Demo Session via /api/v1/auth/demo ...")
-                async with http.post(f"{BASE_URL}/api/v1/auth/demo", json={}) as r:
-                    data = await r.json()
-                    w = data["wallets"][0]
-                    login_id = w["loginid"]
-                    wallet_id = w["id"]
-                    state.balance_usd = w.get("balance_cents", 0) / 100.0
-                    log_event(f"Demo Wallet Active: {login_id} | Balance: ${state.balance_usd:.2f}")
+                if ident and config.password:
+                    # User provided login credentials for custom demo account
+                    log_event(f"Authenticating custom user demo account: {ident} ...")
+                    async with http.post(f"{BASE_URL}/api/v1/auth/login", json=login_payload) as r:
+                        if r.status == 200:
+                            async with http.get(f"{BASE_URL}/api/v1/auth/me") as mr:
+                                mdata = await mr.json()
+                                demo_wallets = [w for w in mdata.get("wallets", []) if w.get("kind") == "demo"]
+                                if demo_wallets:
+                                    w = demo_wallets[0]
+                                    login_id = w["loginid"]
+                                    wallet_id = w["id"]
+                                    state.balance_usd = w.get("balance_cents", 0) / 100.0
+                                    log_event(f"User Demo Wallet Active: {login_id} | Balance: ${state.balance_usd:,.2f}")
+                
+                if not login_id:
+                    # Default guest demo
+                    log_event("Creating Guest Demo Session via /api/v1/auth/demo ...")
+                    async with http.post(f"{BASE_URL}/api/v1/auth/demo", json={}) as r:
+                        data = await r.json()
+                        w = data["wallets"][0]
+                        login_id = w["loginid"]
+                        wallet_id = w["id"]
+                        state.balance_usd = w.get("balance_cents", 0) / 100.0
+                        log_event(f"Guest Demo Active: {login_id} | Balance: ${state.balance_usd:.2f}")
 
             # 2. Get WebSocket token
             async with http.get(f"{BASE_URL}/api/v1/auth/ws-token") as r:
@@ -339,11 +362,11 @@ async def mobile_dashboard():
     <!-- Credentials (only for real) -->
     <div id="cred-box" class="space-y-2 hidden">
       <div>
-        <label class="block text-gray-400 mb-1">Real Email</label>
-        <input type="email" id="cfg-email" placeholder="user@example.com" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white">
+        <label class="block text-gray-400 mb-1">Phone Number or Email</label>
+        <input type="text" id="cfg-identifier" placeholder="+2567... or user@example.com" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white">
       </div>
       <div>
-        <label class="block text-gray-400 mb-1">Real Password</label>
+        <label class="block text-gray-400 mb-1">Account Password</label>
         <input type="password" id="cfg-password" placeholder="••••••••" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-white">
       </div>
     </div>
@@ -415,7 +438,7 @@ async def mobile_dashboard():
     async function startBot() {
       const payload = {
         mode: document.getElementById("cfg-mode").value,
-        email: document.getElementById("cfg-email").value,
+        identifier: document.getElementById("cfg-identifier").value,
         password: document.getElementById("cfg-password").value,
         initial_stake_usd: parseFloat(document.getElementById("cfg-stake").value),
         tp_usd: parseFloat(document.getElementById("cfg-tp").value),
